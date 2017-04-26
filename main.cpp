@@ -59,8 +59,8 @@ typedef struct ADT_AECState {
 #endif
 } ADT_AECState;
 
-struct pollfd fds[1];		/* GPIO value file handlers */
-static int gpio_fd ;//,gpio_fd2
+struct pollfd fds[1];   // GPIO value file handlers
+static int gpio_fd ;    //,gpio_fd2
 static ADT_AECState g_AECState;
 
 static int gpioInit(void);
@@ -91,6 +91,7 @@ static int  xrunRecovery(snd_pcm_t *handle, int error);
 void  customMessageHandler(QtMsgType type, const char *msg)
 {
     QString txt;
+
     switch (type) {
     case QtDebugMsg:
         txt = QString("qDebug: %1").arg(msg);
@@ -105,6 +106,7 @@ void  customMessageHandler(QtMsgType type, const char *msg)
         txt = QString("Fatal: %1").arg(msg);
         abort();
     }
+
     QString current_date_time = QDateTime::currentDateTime().toString("MMdd hh:mm:ss");
     QString message = QString("[%1]******** %4").arg(current_date_time).arg(txt);
 
@@ -123,8 +125,7 @@ static int gpioInit(void)
     int fd;
 
     fd = open("/sys/class/gpio/gpio5/direction", O_RDWR);
-    if(fd < 0)
-    {
+    if(fd < 0) {
         qDebug("Open file /sys/class/gpio/gpio5/direction failed!\n");
         return -1;
     }
@@ -132,8 +133,7 @@ static int gpioInit(void)
     close(fd);
 
     fd = open("/sys/class/gpio/gpio5/edge", O_RDWR);
-    if(fd < 0)
-    {
+    if(fd < 0) {
         qDebug("Open file /sys/class/gpio/gpio5/edge failed!\n");
         return -1;
     }
@@ -141,23 +141,21 @@ static int gpioInit(void)
     close(fd);
 
     gpio_fd = open("/sys/class/gpio/gpio5/value", O_RDONLY);
-    if(gpio_fd < 0)
-    {
+    if(gpio_fd < 0) {
         qDebug("Open file /sys/class/gpio/gpio5/value failed!\n");
         return -1;
     }
+
     fds[0].fd = gpio_fd;
     fds[0].events  = POLLPRI;
 
     ret = poll(fds, 1, 0);   /* first poll to clean residue r-event */
-    if(ret == -1)
-    {
+    if(ret == -1) {
         qDebug("Poll on gpio value files failed!\n");
         close(fds[0].fd);
         return -1;
     }
-    else if(ret > 0)
-    {
+    else if(ret > 0) {
         qDebug("First poll return is :%d.\n", ret);
     }
 
@@ -206,7 +204,6 @@ static void gpioHandle(void)
         return;
     }
 
-
     if(fds[0].revents & POLLPRI)
     {
         ret = lseek(gpio_fd, 0, SEEK_SET);
@@ -227,7 +224,6 @@ static void gpioHandle(void)
         {
             g_AECState.is_enable = true;
             qDebug("gpio5 value is 0. AEC is enable.");
-
         }
         else if (ch == 49)
         {
@@ -684,7 +680,6 @@ static int TimevalSubtract(struct timeval *result,struct timeval tv_begin,struct
 
     /* Return 1 if result is negative. */
     return tv_end.tv_sec < tv_begin.tv_sec;
-
 }
 
 ///////////////////////////////////
@@ -729,17 +724,19 @@ void backGroundThread(void *ptr)
         if(usToSleep < 0)
             continue;
         usleep(usToSleep);
-
     }
-    return;
 
+    return;
 }
 
 int main(int argc, char *argv[])
 {
-   QCoreApplication a(argc, argv);
+    QCoreApplication a(argc, argv);
 
+    // prints out debug messages, warnings, critical and fatal error messages
     qInstallMsgHandler(customMessageHandler);
+
+    // Initialization
     init();
 
     return a.exec();
@@ -753,7 +750,8 @@ void init()
     char *play_back_dev = strdup("plughw:0,0");
     char *capture_dev   = strdup("plughw:0,0");
 
-    qDebug()<<"/********************************************************************/";
+    qDebug()<<"/*******************************************/";
+
     ret = gpioInit();
     if (ret<0)
     {
