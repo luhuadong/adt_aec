@@ -1,3 +1,28 @@
+/*
+************************************************************************************************************************
+*                                         ADT AEC
+*
+*            (c) Copyright 2016-2017; Guangzhou Guangyou Communication Equipment Co., Ltd.
+*            Address: No.173, Dunhe Road, Haizhu, Guangzhou, Guangdong, China
+*
+*            All rights reserved.  Protected by international copyright laws.
+*
+*
+* File      : MAIN.CPP
+* Created   : Zheng Yu
+* Modified  : Lu Huadong
+* Version   : V0.0.12
+*
+* DESCRIPTION:
+* ---------------
+*           Acoustic processing and echo control Sound pickup and playback is an important area of
+*           multimedia processing. This project depend on acoustics echo canceling algorithm library,
+*           which from the AD (Analog Devices). Here, we use cross compile tool chain, called poky.
+*           Because the target 'adt_aec' executable program will be run on SMARC-IMX6Q platform.
+*
+************************************************************************************************************************
+*/
+
 #include <QCoreApplication>
 #include <QSettings>
 #include <QDateTime>
@@ -16,7 +41,11 @@
  *
  ***************************************************************************/
 
-#define ADT_AEC_VERSION "0.0.11"
+//#define ADT_AEC_VERSION "0.0.11"
+
+#define VER_MAJOR 0
+#define VER_MINOR 0
+#define VER_PATCH 12
 
 // modified by luhuadong at 20170323
 //#define FRAME_SIZE 	160
@@ -247,7 +276,8 @@ void parseConfigFile()
     bypass_mode = configRead.value("/setting/bypassMode","0").toInt();
     dump = configRead.value("/setting/ecDump","0").toInt();
 
-    configRead.setValue("/setting/version", QString(ADT_AEC_VERSION));
+    //configRead.setValue("/setting/version", QString(ADT_AEC_VERSION));
+    configRead.setValue("/setting/version", QString("%1.%2.%3").arg(VER_MAJOR).arg(VER_MINOR).arg(VER_PATCH));
     version = configRead.value("/setting/version","null").toString();
 
     //qDebug()<<"src"<<src_type<<"dst"<<dst_type;
@@ -729,6 +759,21 @@ void backGroundThread(void *ptr)
     return;
 }
 
+/*
+*******************************************************************************
+*                                  MAIN
+*
+* Description: This function is the entry of program.
+*
+* Arguments  : argc         count of parameters
+*
+*              argv         parameters
+*
+*
+* Returns    : == 0         Succeed.
+*              <  0         Failed.
+*******************************************************************************
+*/
 int main(int argc, char *argv[])
 {
     QCoreApplication a(argc, argv);
