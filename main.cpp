@@ -30,6 +30,7 @@
 #include <QFile>
 #include <sys/time.h>
 #include <fcntl.h>   /* added for GPIO */
+#include <stdio.h>
 
 #include <alsa/asoundlib.h>
 #include "adt_typedef_user.h"
@@ -86,6 +87,8 @@ typedef struct ADT_AECState {
     FILE *stereofile;
     FILE *cleanfile;
 #endif
+    bool gpio_enable;
+    int  gpio_number;
 } ADT_AECState;
 
 struct pollfd fds[1];   // GPIO value file handlers
@@ -112,11 +115,22 @@ static void backGroundThread(void *ptr);
 
 static int  xrunRecovery(snd_pcm_t *handle, int error);
 
-/***************************************************************************
- *
- * qqDebug logfile handle
- *
- ***************************************************************************/
+
+/*
+*******************************************************************************
+*                         customMessageHandler
+*
+* Description: qqDebug logfile handle.
+*
+* Arguments  : argc         count of parameters
+*
+*              argv         parameters
+*
+*
+* Returns    : == 0         Succeed.
+*              <  0         Failed.
+*******************************************************************************
+*/
 void  customMessageHandler(QtMsgType type, const char *msg)
 {
     QString txt;
@@ -147,31 +161,54 @@ void  customMessageHandler(QtMsgType type, const char *msg)
     outFile.close();
 }
 
+/*
+*******************************************************************************
+*                                gpioInit
+*
+* Description: This function is the entry of program.
+*
+* Arguments  : argc         count of parameters
+*
+*              argv         parameters
+*
+*
+* Returns    : == 0         Succeed.
+*              <  0         Failed.
+*******************************************************************************
+*/
 static int gpioInit(void)
 {
     int ret;
     char ch;
     int fd;
 
-    fd = open("/sys/class/gpio/gpio5/direction", O_RDWR);
+    char path_gpio_direction[64];
+    char path_gpio_edge[64];
+    char path_gpio_value[64];
+
+    sprintf(path_gpio_direction, "/sys/class/gpio/gpio%d/direction", g_AECState.gpio_number);
+    sprintf(path_gpio_edge, "/sys/class/gpio/gpio%d/edge", g_AECState.gpio_number);
+    sprintf(path_gpio_value, "/sys/class/gpio/gpio%d/value", g_AECState.gpio_number);
+
+    fd = open(path_gpio_direction, O_RDWR);
     if(fd < 0) {
-        qDebug("Open file /sys/class/gpio/gpio5/direction failed!\n");
+        qDebug("Open file hands free gpio (direction) failed!\n");
         return -1;
     }
     write(fd, "in", 2);
     close(fd);
 
-    fd = open("/sys/class/gpio/gpio5/edge", O_RDWR);
+    fd = open(path_gpio_edge, O_RDWR);
     if(fd < 0) {
-        qDebug("Open file /sys/class/gpio/gpio5/edge failed!\n");
+        qDebug("Open file hands free gpio (edge) failed!\n");
         return -1;
     }
     write(fd, "both", 4);
     close(fd);
 
-    gpio_fd = open("/sys/class/gpio/gpio5/value", O_RDONLY);
+    gpio_fd = open(path_gpio_value, O_RDONLY);
     if(gpio_fd < 0) {
-        qDebug("Open file /sys/class/gpio/gpio5/value failed!\n");
+        qDebug("Open file hands free gpio (value) failed!\n");
         return -1;
     }
 
@@ -202,21 +239,36 @@ static int gpioInit(void)
             qDebug("errror read on fd2.\n");
             return -1;
         }
-//        if(ch == 48)
-//        {
-//            g_AECState.is_enable=true;
-//        }
-//        else if(ch == 49)
-//        {
-//            g_AECState.is_enable=false;
-//        }
+        //        if(ch == 48)
+        //        {
+        //            g_AECState.is_enable=true;
+        //        }
+        //        else if(ch == 49)
+        //        {
+        //            g_AECState.is_enable=false;
+        //        }
         qDebug("First value of CTRL pin is: %c. \n", ch);
     }
 
-    g_AECState.is_enable = false;
+    //g_AECState.is_enable = false;
     return 0;
 }
 
+/*
+*******************************************************************************
+*                               gpioHandle
+*
+* Description: This function is the entry of program.
+*
+* Arguments  : argc         count of parameters
+*
+*              argv         parameters
+*
+*
+* Returns    : == 0         Succeed.
+*              <  0         Failed.
+*******************************************************************************
+*/
 static void gpioHandle(void)
 {
     int ret;
@@ -252,17 +304,31 @@ static void gpioHandle(void)
         if(ch == 48)
         {
             g_AECState.is_enable = true;
-            qDebug("gpio5 value is 0. AEC is enable.");
+            qDebug("Hands free GPIO value is 0. AEC is enable.");
         }
         else if (ch == 49)
         {
             g_AECState.is_enable = false;
-            qDebug("gpio5 value is 1. AEC is disable.");
+            qDebug("Hands free GPIO value is 1. AEC is disable.");
         }
-    }
-
+    } // End if(fds[0].revents & POLLPRI)
 }
 
+/*
+*******************************************************************************
+*                            parseConfigFile
+*
+* Description: This function is the entry of program.
+*
+* Arguments  : argc         count of parameters
+*
+*              argv         parameters
+*
+*
+* Returns    : == 0         Succeed.
+*              <  0         Failed.
+*******************************************************************************
+*/
 void parseConfigFile()
 {
     QString cfg_file = QString(QCoreApplication::applicationDirPath() +"/adt_aec.conf");
@@ -270,6 +336,7 @@ void parseConfigFile()
     QString version;
     int bypass_mode;
     int dump;
+
     QSettings configRead(cfg_file, QSettings::IniFormat);
     src_type = configRead.value("/setting/srcType","alsa").toString();
     dst_type = configRead.value("/setting/dstType","alsa").toString();
@@ -280,6 +347,17 @@ void parseConfigFile()
     configRead.setValue("/setting/version", QString("%1.%2.%3").arg(VER_MAJOR).arg(VER_MINOR).arg(VER_PATCH));
     version = configRead.value("/setting/version","null").toString();
 
+    if(configRead.value("/GPIO/gpio_enable").toString() == "YES") {
+        g_AECState.gpio_enable = true;
+        g_AECState.gpio_number = configRead.value("/GPIO/gpio_number").toInt();
+        g_AECState.is_enable = false;
+    }
+    else {
+        g_AECState.gpio_enable = false;
+        g_AECState.gpio_number = -1;
+        g_AECState.is_enable = true;
+    }
+
     //qDebug()<<"src"<<src_type<<"dst"<<dst_type;
     qDebug()<<"version"<<version<<"bypass"<<bypass_mode<<"dump"<<dump;
 
@@ -289,6 +367,21 @@ void parseConfigFile()
     g_AECState.pcm_dest = PCMALSA;
 }
 
+/*
+*******************************************************************************
+*                             initAECEngine
+*
+* Description: This function is the entry of program.
+*
+* Arguments  : argc         count of parameters
+*
+*              argv         parameters
+*
+*
+* Returns    : == 0         Succeed.
+*              <  0         Failed.
+*******************************************************************************
+*/
 static int initAECEngine()
 {
     g_AECState.hAEC = NULL;
@@ -300,50 +393,50 @@ static int initAECEngine()
     IAECG4_Params MyParams = {
         // Base Parameters
         sizeof(IAECG4_Params),
-        0,            //LockCallback_t
-        FRAME_SIZE,        //FRAME_SIZE // modified by luhuadong at 20170323
-        0,            // AntiHowlEnable
-        8000,     //SAMPLING_RATE
-                4000,     //SAMPLING_RATE/2
-        0,  //FixedBulkDelayMSec // modified by luhuadong at 20170323
-        0,            //TailSearchSamples
-        0,            //InitialBulkDelay
+        0,          //LockCallback_t
+        FRAME_SIZE, //FRAME_SIZE // modified by luhuadong at 20170323
+        0,          // AntiHowlEnable
+        8000,       //SAMPLING_RATE
+        4000,       //SAMPLING_RATE/2
+        0,          //FixedBulkDelayMSec // modified by luhuadong at 20170323
+        0,          //TailSearchSamples
+        0,          //InitialBulkDelay
         128,        // ADT_Int16 ActiveTailLengthMSec
-        128, //32,             //ADT_Int16 TotalTailLengthMSec
-        1, //0,//10,       //ADT_Int16 txNLPAggressiveness
-        20, //0,//33, //ADT_Int16 MaxTxLossSTdB;
-        15, //0, //12, //12, //ADT_Int16 MaxTxLossDTdB;
+        128,        //32,       //ADT_Int16 TotalTailLengthMSec
+        1,          //0,//10,   //ADT_Int16 txNLPAggressiveness
+        20,         //0,//33,   //ADT_Int16 MaxTxLossSTdB;
+        15,         //0, //12, //12, //ADT_Int16 MaxTxLossDTdB;
         4,          // 12, //ADT_Int16 MaxRxLossdB;
-        0,            //InitialRxOutAttendB
+        0,          //InitialRxOutAttendB
         -85,        // ADT_Int16 TargetResidualLeveldBm;
         -90,        //-60,    // ADT_Int16 MaxRxNoiseLeveldBm;
-        -25,                        // ADT_Int16 worstExpectedERLdB
-        -3, //-3, //6, //                    //RxSaturateLeveldBm
-        1,                            // ADT_Int16 NoiseReduction1Setting
-        0,                            // ADT_Int16 NoiseReduction2Setting
-        1,                            //CNGEnable
-        0, //0,                    //fixedGaindB10
+        -25,        // ADT_Int16 worstExpectedERLdB
+        -3,         //-3, //6, //      //RxSaturateLeveldBm
+        1,          // ADT_Int16 NoiseReduction1Setting
+        0,          // ADT_Int16 NoiseReduction2Setting
+        1,          //CNGEnable
+        0,          //0,      //fixedGaindB10
 
-    // TxAGC Parameters
-        0,                            // ADT_Int8 AGCEnable;
-        10,                          // ADT_Int8 AGCMaxGaindB;
-        10,                            //ADT_Int8 AGCMaxLossdB;
+        // TxAGC Parameters
+        0,          // ADT_Int8 AGCEnable;
+        10,         // ADT_Int8 AGCMaxGaindB;
+        10,         //ADT_Int8 AGCMaxLossdB;
         -15,        // ADT_Int8 AGCTargetLeveldBm;
         -40,        //ADT_Int8 AGCLowSigThreshdBm;
 
         // RxAGC Parameters
-        0,                            // ADT_Int8 AGCEnable;
-        10,                          // ADT_Int8 AGCMaxGaindB;
-        15,                          //ADT_Int8 AGCMaxLossdB;
+        0,          // ADT_Int8 AGCEnable;
+        10,         // ADT_Int8 AGCMaxGaindB;
+        15,         //ADT_Int8 AGCMaxLossdB;
         -10,        // ADT_Int8 AGCTargetLeveldBm;
         -40,        //ADT_Int8 AGCLowSigThreshdBm;
-        0,                            //RxBypass
-        0,     //ADT_Int16 maxTrainingTimeMSec,
-        -40,   //trainingRxNoiseLeveldBm
-        0,     //ADT_Int16 pTxEqualizer
-        0,     //mipsMemReductionSetting
-        0,     //mipsReductionSetting2
-        0     //reserved
+        0,          //RxBypass
+        0,          //ADT_Int16 maxTrainingTimeMSec,
+        -40,        //trainingRxNoiseLeveldBm
+        0,          //ADT_Int16 pTxEqualizer
+        0,          //mipsMemReductionSetting
+        0,          //mipsReductionSetting2
+        0           //reserved
     };
 
     if ((g_AECState.hAEC = AECG4_ADT_create(0, &MyParams)) == 0) {
@@ -366,15 +459,30 @@ static int initAECEngine()
     return 0;
 }
 
+/*
+*******************************************************************************
+*                              initALSAPlayback
+*
+* Description: This function is the entry of program.
+*
+* Arguments  : argc         count of parameters
+*
+*              argv         parameters
+*
+*
+* Returns    : == 0         Succeed.
+*              <  0         Failed.
+*******************************************************************************
+*/
 bool initALSAPlayback(bool outputOnly, char *playbackDev)
 {
     snd_pcm_t *pcm_handle;
     snd_pcm_hw_params_t *hwparams;
     snd_pcm_sw_params_t *swparams;
     char *pcm_name;
-    pcm_name = strdup("plughw:0,0");    
+    pcm_name = strdup("plughw:0,0");
     //int rate = SAMPLE_RATE; /* Sample rate */
-    int exact_rate;    
+    int exact_rate;
     int period_size=FRAME_SIZE;       /* Number of periods */
     //int buffer_size=period_size *2*2*2;
     int buffer_size=period_size * 2; // modified by luhuadong at 20170323
@@ -422,45 +530,45 @@ bool initALSAPlayback(bool outputOnly, char *playbackDev)
     /* access, but this is beyond the scope   */
     /* of this introduction.                  */
     if (snd_pcm_hw_params_set_access(pcm_handle, hwparams, SND_PCM_ACCESS_RW_INTERLEAVED) < 0) {
-      qDebug("Error setting access.\n");
-      return(false);
+        qDebug("Error setting access.\n");
+        return(false);
     }
 
     /* Set sample format */
     if (snd_pcm_hw_params_set_format(pcm_handle, hwparams, SND_PCM_FORMAT_S16_LE) < 0) {
-      qDebug("Error setting format.\n");
-      return(false);
+        qDebug("Error setting format.\n");
+        return(false);
     }
 
     /* Set sample rate. If the exact rate is not supported */
     /* by the hardware, use nearest possible rate.         */
     exact_rate = SAMPLE_RATE;
     if (snd_pcm_hw_params_set_rate_near(pcm_handle, hwparams, &exact_rate, 0) < 0) {
-      qDebug("Error setting rate.\n");
-      return(false);
+        qDebug("Error setting rate.\n");
+        return(false);
     }
     if (SAMPLE_RATE != exact_rate) {
-      qDebug("The rate %d Hz is not supported by your hardware.\n ==> Using %d Hz instead.\n", (int)SAMPLE_RATE, exact_rate);
+        qDebug("The rate %d Hz is not supported by your hardware.\n ==> Using %d Hz instead.\n", (int)SAMPLE_RATE, exact_rate);
     }
 
     /* Set number of channels */
     if (snd_pcm_hw_params_set_channels(pcm_handle, hwparams, 2) < 0) {
-      qDebug("Error setting channels.\n");
-      return(false);
+        qDebug("Error setting channels.\n");
+        return(false);
     }
 
     /* Set period size. */
     if (snd_pcm_hw_params_set_period_size_near(pcm_handle, hwparams, (snd_pcm_uframes_t*)&period_size, 0) < 0) {
-      qDebug("Error setting periods.\n");
-      return(false);
+        qDebug("Error setting periods.\n");
+        return(false);
     }
     qDebug("Period size set to %d\n", period_size);
 
 
     if (error=snd_pcm_hw_params_set_buffer_size_near(pcm_handle, hwparams,  (snd_pcm_uframes_t*)&buffer_size) < 0)
     {
-      qDebug("Error setting buffersize. %s\n", snd_strerror (error));
-      return(false);
+        qDebug("Error setting buffersize. %s\n", snd_strerror (error));
+        return(false);
     }
     qDebug("playback Buffer size set to %d\n", buffer_size);
 
@@ -468,8 +576,8 @@ bool initALSAPlayback(bool outputOnly, char *playbackDev)
     /* PCM device and prepare device  */
     if (snd_pcm_hw_params(pcm_handle, hwparams) < 0)
     {
-      qDebug("Error setting HW params.\n");
-      return(false);
+        qDebug("Error setting HW params.\n");
+        return(false);
     }
 
     g_AECState.audioInfo.pcm_handle_playback = pcm_handle;
@@ -483,7 +591,21 @@ bool initALSAPlayback(bool outputOnly, char *playbackDev)
     return true;
 }
 
-
+/*
+*******************************************************************************
+*                             initALSAPlayback
+*
+* Description: This function is the entry of program.
+*
+* Arguments  : argc         count of parameters
+*
+*              argv         parameters
+*
+*
+* Returns    : == 0         Succeed.
+*              <  0         Failed.
+*******************************************************************************
+*/
 bool initALSACapture(char *captureDev)
 {
 
@@ -525,51 +647,48 @@ bool initALSACapture(char *captureDev)
         return(false);
     }
 
-
     /* Set access type. */
     if (snd_pcm_hw_params_set_access(pcm_handle, hwparams, SND_PCM_ACCESS_RW_INTERLEAVED) < 0) {
-      qDebug("Error setting access.\n");
-      return(false);
+        qDebug("Error setting access.\n");
+        return(false);
     }
 
     /* Set sample format */
     if (snd_pcm_hw_params_set_format(pcm_handle, hwparams, SND_PCM_FORMAT_S16_LE) < 0) {
-      qDebug("Error setting format.\n");
-      return(false);
+        qDebug("Error setting format.\n");
+        return(false);
     }
 
     /* Set sample rate. If the exact rate is not supported */
     /* by the hardware, use nearest possible rate.         */
     exact_rate = SAMPLE_RATE;
     if (snd_pcm_hw_params_set_rate_near(pcm_handle, hwparams, &exact_rate, 0) < 0) {
-      qDebug("Error setting rate.\n");
-      return(false);
+        qDebug("Error setting rate.\n");
+        return(false);
     }
     if (SAMPLE_RATE != exact_rate) {
-      qDebug("The rate %d Hz is not supported by your hardware.\n ==> Using %d Hz instead.\n", (int)SAMPLE_RATE, exact_rate);
+        qDebug("The rate %d Hz is not supported by your hardware.\n ==> Using %d Hz instead.\n", (int)SAMPLE_RATE, exact_rate);
     }
 
     /* Set number of channels */
     if (snd_pcm_hw_params_set_channels(pcm_handle, hwparams, 2) < 0) {
-      qDebug("Error setting channels.\n");
-      return(false);
+        qDebug("Error setting channels.\n");
+        return(false);
     }
-
 
     /* Set period size. */
     if (snd_pcm_hw_params_set_period_size_near(pcm_handle, hwparams, (snd_pcm_uframes_t*)&period_size, 0) < 0) {
-      qDebug("Error setting periods.\n");
-      return(false);
+        qDebug("Error setting periods.\n");
+        return(false);
     }
     qDebug("Period size set to %d\n", period_size);
-
 
     /* Set buffer size (in frames). The resulting latency is given by */
     /* latency = periodsize * periods / (rate * bytes_per_frame)     */
     if (error=snd_pcm_hw_params_set_buffer_size_near(pcm_handle, hwparams,  (snd_pcm_uframes_t*)&buffer_size) < 0)
     {
-      qDebug("Error setting buffersize. %s\n", snd_strerror (error));
-      return(false);
+        qDebug("Error setting buffersize. %s\n", snd_strerror (error));
+        return(false);
     }
     qDebug("capture Buffer size set to %d\n", buffer_size);
 
@@ -577,8 +696,8 @@ bool initALSACapture(char *captureDev)
     /* PCM device and prepare device  */
     if (snd_pcm_hw_params(pcm_handle, hwparams) < 0)
     {
-      qDebug("Error setting HW params.\n");
-      return(false);
+        qDebug("Error setting HW params.\n");
+        return(false);
     }
 
     g_AECState.audioInfo.pcm_handle_capture = pcm_handle;
@@ -591,6 +710,21 @@ bool initALSACapture(char *captureDev)
     return true;
 }
 
+/*
+*******************************************************************************
+*                                initAudio
+*
+* Description: This function is the entry of program.
+*
+* Arguments  : argc         count of parameters
+*
+*              argv         parameters
+*
+*
+* Returns    : == 0         Succeed.
+*              <  0         Failed.
+*******************************************************************************
+*/
 bool initAudio(bool outputOnly, char *captureDev, char *playbackDev)
 {
     system("amixer -q set 'Capture Mux' LINE_IN &");
@@ -619,39 +753,68 @@ bool initAudio(bool outputOnly, char *captureDev, char *playbackDev)
 }
 
 //recovery callback in case of error
+/*
+*******************************************************************************
+*                               xrunRecovery
+*
+* Description: This function is the entry of program.
+*
+* Arguments  : argc         count of parameters
+*
+*              argv         parameters
+*
+*
+* Returns    : == 0         Succeed.
+*              <  0         Failed.
+*******************************************************************************
+*/
 static int xrunRecovery(snd_pcm_t *handle, int error)
 {
     switch(error)
     {
-        case -EPIPE:    // Buffer Over-run
-            if (error = snd_pcm_prepare(handle)< 0)
-                qDebug(" Buffer overrrun/underrun cannot be recovered, snd_pcm_prepare fail: %s\n", snd_strerror(error));
-            return 0;
-            break;
+    case -EPIPE:    // Buffer Over-run
+        if (error = snd_pcm_prepare(handle)< 0)
+            qDebug(" Buffer overrrun/underrun cannot be recovered, snd_pcm_prepare fail: %s\n", snd_strerror(error));
+        return 0;
+        break;
 
-        case -ESTRPIPE: //suspend event occurred
-            //EAGAIN means that the request cannot be processed immediately
-            while ((error = snd_pcm_resume(handle)) == -EAGAIN)
-                sleep(1);// wait until the suspend flag is clear
+    case -ESTRPIPE: //suspend event occurred
+        //EAGAIN means that the request cannot be processed immediately
+        while ((error = snd_pcm_resume(handle)) == -EAGAIN)
+            sleep(1);// wait until the suspend flag is clear
 
-            if (error < 0) // error case
-            {
-                if (error = snd_pcm_prepare(handle) < 0)
-                    qDebug("Suspend cannot be recovered, snd_pcm_prepare fail: %s\n", snd_strerror(error));
-            }
-            return 0;
-            break;
+        if (error < 0) // error case
+        {
+            if (error = snd_pcm_prepare(handle) < 0)
+                qDebug("Suspend cannot be recovered, snd_pcm_prepare fail: %s\n", snd_strerror(error));
+        }
+        return 0;
+        break;
 
-        case -EBADFD: //Error PCM descriptor is wrong
-            break;
+    case -EBADFD: //Error PCM descriptor is wrong
+        break;
 
-        default:
-            break;
+    default:
+        break;
     }
     return error;
 }
 
-
+/*
+*******************************************************************************
+*                             shutdownAECEngine
+*
+* Description: This function is the entry of program.
+*
+* Arguments  : argc         count of parameters
+*
+*              argv         parameters
+*
+*
+* Returns    : == 0         Succeed.
+*              <  0         Failed.
+*******************************************************************************
+*/
 static bool shutdownAECEngine()
 {
     if (g_AECState.hAEC) {
@@ -675,7 +838,21 @@ static bool shutdownAECEngine()
     return true;
 }
 
-
+/*
+*******************************************************************************
+*                              shutdownAudio
+*
+* Description: This function is the entry of program.
+*
+* Arguments  : argc         count of parameters
+*
+*              argv         parameters
+*
+*
+* Returns    : == 0         Succeed.
+*              <  0         Failed.
+*******************************************************************************
+*/
 static bool shutdownAudio()
 {
     if(g_AECState.audioInfo.pcm_handle_playback)
@@ -686,6 +863,21 @@ static bool shutdownAudio()
     return true;
 }
 
+/*
+*******************************************************************************
+*                              TimevalSubtract
+*
+* Description: This function is the entry of program.
+*
+* Arguments  : argc         count of parameters
+*
+*              argv         parameters
+*
+*
+* Returns    : == 0         Succeed.
+*              <  0         Failed.
+*******************************************************************************
+*/
 static int TimevalSubtract(struct timeval *result,struct timeval tv_begin,struct timeval tv_end)
 {
 
@@ -717,7 +909,21 @@ static int TimevalSubtract(struct timeval *result,struct timeval tv_begin,struct
 //	BackgroundThread() runs every 20ms
 //
 ///////////////////////////////////
-
+/*
+*******************************************************************************
+*                              backGroundThread
+*
+* Description: This function is the entry of program.
+*
+* Arguments  : argc         count of parameters
+*
+*              argv         parameters
+*
+*
+* Returns    : == 0         Succeed.
+*              <  0         Failed.
+*******************************************************************************
+*/
 void backGroundThread(void *ptr)
 {
     struct timeval tv_begin, tv_end, tv_result;
@@ -733,7 +939,7 @@ void backGroundThread(void *ptr)
         gettimeofday(&tv_begin, NULL);
 
         if(--countDown == 0)
-        {            
+        {
             //qDebug("OneSecTick");
             countDown = 50;
 
@@ -787,6 +993,21 @@ int main(int argc, char *argv[])
     return a.exec();
 }
 
+/*
+*******************************************************************************
+*                                  init
+*
+* Description: This function is the entry of program.
+*
+* Arguments  : argc         count of parameters
+*
+*              argv         parameters
+*
+*
+* Returns    : == 0         Succeed.
+*              <  0         Failed.
+*******************************************************************************
+*/
 void init()
 {
     int ret;
@@ -797,13 +1018,16 @@ void init()
 
     qDebug()<<"/*******************************************/";
 
-    ret = gpioInit();
-    if (ret<0)
-    {
-        qDebug("GPIO initialization failed.!");
+    parseConfigFile();
+
+    if(g_AECState.gpio_enable) {
+        ret = gpioInit();
+        if (ret<0)
+        {
+            qDebug("GPIO initialization failed.!");
+        }
     }
 
-    parseConfigFile();
 
     if(!initAudio(0,capture_dev,play_back_dev))
     {
@@ -827,12 +1051,15 @@ void init()
         return;
     }
 
-    ret = pthread_create(&bThreadId, NULL,(void *) &backGroundThread, NULL);
-    if(ret != 0)
-    {
-        qDebug("backGroundThread thread create failed .Exit!  ");
-        return;
+    if(g_AECState.gpio_enable) {
+        ret = pthread_create(&bThreadId, NULL,(void *) &backGroundThread, NULL);
+        if(ret != 0)
+        {
+            qDebug("backGroundThread thread create failed .Exit!  ");
+            return;
+        }
     }
+
 
     qDebug("adt_aec init OK.");
 }
@@ -842,6 +1069,21 @@ void init()
  *	inputs[1]= near speech & echo signal (read from soundcard)
  *	outputs[0]=  is a copy of inputs[0] to be sent to soundcard
  *	outputs[1]=  near end speech, echo removed - towards far end
+*/
+/*
+*******************************************************************************
+*                               frameProcess
+*
+* Description: This function is the entry of program.
+*
+* Arguments  : argc         count of parameters
+*
+*              argv         parameters
+*
+*
+* Returns    : == 0         Succeed.
+*              <  0         Failed.
+*******************************************************************************
 */
 void frameProcess(void *ptr )
 {
@@ -855,7 +1097,7 @@ void frameProcess(void *ptr )
     ADT_Int16 ref[MAX_FRAME_SIZE];
     ADT_Int16 clean[MAX_FRAME_SIZE];
 
-    ADT_Int16 stereo[MAX_FRAME_SIZE*2];    
+    ADT_Int16 stereo[MAX_FRAME_SIZE*2];
     ADT_Int16 out_stereo[MAX_FRAME_SIZE*2];
     snd_pcm_uframes_t size = FRAME_SIZE;
 
@@ -1001,10 +1243,42 @@ void frameProcess(void *ptr )
     return;
 }
 
+/*
+*******************************************************************************
+*                             getInputFrame
+*
+* Description: This function is the entry of program.
+*
+* Arguments  : argc         count of parameters
+*
+*              argv         parameters
+*
+*
+* Returns    : == 0         Succeed.
+*              <  0         Failed.
+*******************************************************************************
+*/
 static void getInputFrame(ADT_Int16 *ref, ADT_Int16 *echo)
 {    
+
 }
 
+/*
+*******************************************************************************
+*                              outPutFrame
+*
+* Description: This function is the entry of program.
+*
+* Arguments  : argc         count of parameters
+*
+*              argv         parameters
+*
+*
+* Returns    : == 0         Succeed.
+*              <  0         Failed.
+*******************************************************************************
+*/
 static void outPutFrame(ADT_Int16 *clean)
 {
+
 }
