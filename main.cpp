@@ -48,9 +48,10 @@
 #define VER_MINOR 0
 #define VER_PATCH 12
 
-// modified by luhuadong at 20170323
-//#define FRAME_SIZE 	160
-#define FRAME_SIZE 	80
+// Do not easily modify, Unless you really know what you're doing
+#define FRAME_SIZE 	160
+//#define FRAME_SIZE 	80
+
 #define MAX_FRAME_SIZE 640
 #define SAMPLE_RATE	8000
 #define EC_DUMP 1
@@ -398,7 +399,7 @@ static int initAECEngine()
         // Base Parameters
         sizeof(IAECG4_Params),
         0,          //LockCallback_t
-        FRAME_SIZE, //FRAME_SIZE // modified by luhuadong at 20170323
+        FRAME_SIZE, //FRAME_SIZE, Do not easily modify.
         0,          // AntiHowlEnable
         8000,       //SAMPLING_RATE
         4000,       //SAMPLING_RATE/2
@@ -488,8 +489,11 @@ bool initALSAPlayback(bool outputOnly, char *playbackDev)
     //int rate = SAMPLE_RATE; /* Sample rate */
     int exact_rate;
     int period_size=FRAME_SIZE;       /* Number of periods */
-    //int buffer_size=period_size *2*2*2;
-    int buffer_size=period_size * 2; // modified by luhuadong at 20170323
+
+    // Do not easily modify, Unless you really know what you're doing
+    int buffer_size=period_size *2*2*2;
+    //int buffer_size=period_size * 2; // modified by luhuadong at 20170323
+
     int error;
     int mode;
 
@@ -615,8 +619,11 @@ bool initALSACapture(char *captureDev)
 
     int exact_rate;
     int period_size= FRAME_SIZE;
-    //int buffer_size=period_size *2*2*2;
-    int buffer_size=period_size * 2; // modified by luhuadong at 20170323
+
+    // Do not easily modify, Unless you really know what you're doing
+    int buffer_size=period_size *2*2*2;
+    //int buffer_size=period_size * 2; // modified by luhuadong at 20170323
+
     int error;
     char *pcm_name;
     snd_pcm_t *pcm_handle;
