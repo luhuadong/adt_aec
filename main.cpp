@@ -250,7 +250,7 @@ static int gpioInit(void)
         qDebug("First value of CTRL pin is: %c. \n", ch);
     }
 
-    //g_AECState.is_enable = false;
+    g_AECState.is_enable = false;
     return 0;
 }
 
@@ -275,43 +275,44 @@ static void gpioHandle(void)
     char ch;
 
     ret = poll(fds, 1, 0);   /* poll on 1 file and no wait */
-    if(ret == -1)
-    {
-        qDebug("Poll on gpio value files failed!\n");
-        return;
+
+    if(-1 == ret) {
+        qDebug() << "gpioHandle : Poll on gpio value files failed!";
+        //return;
     }
-    else if(ret == 0)
-    {
-        return;
+    else if(0 == ret) {
+        //qDebug() << "gpioHandle : Poll nothing, bye";
+        //return;
+    }
+    else if(ret > 0) {
+        qDebug() << "gpioHandle : Poll ready, ret = " << ret;
+
+        if(fds[0].revents & POLLPRI)
+        {
+            ret = lseek(gpio_fd, 0, SEEK_SET);
+            if(ret == -1) {
+                qDebug("errror lseek on gpio_fd5.\n");
+                return;
+            }
+
+            ret = read(gpio_fd, &ch, 1);
+            if(ret == -1) {
+                qDebug("errror read on fd.\n");
+                return;
+            }
+
+            if('0' == ch) {
+                g_AECState.is_enable = true;
+                qDebug("Hands free GPIO value is 0. AEC is enable.");
+            }
+            else if ('1' == ch) {
+                g_AECState.is_enable = false;
+                qDebug("Hands free GPIO value is 1. AEC is disable.");
+            }
+        } // End if(fds[0].revents & POLLPRI)
     }
 
-    if(fds[0].revents & POLLPRI)
-    {
-        ret = lseek(gpio_fd, 0, SEEK_SET);
-        if(ret == -1)
-        {
-            qDebug("errror lseek on gpio_fd5.\n");
-            return;
-        }
-        ret = read(gpio_fd, &ch, 1);
-
-        if(ret == -1)
-        {
-            qDebug("errror read on fd.\n");
-            return;
-        }
-
-        if(ch == 48)
-        {
-            g_AECState.is_enable = true;
-            qDebug("Hands free GPIO value is 0. AEC is enable.");
-        }
-        else if (ch == 49)
-        {
-            g_AECState.is_enable = false;
-            qDebug("Hands free GPIO value is 1. AEC is disable.");
-        }
-    } // End if(fds[0].revents & POLLPRI)
+    return;
 }
 
 /*
@@ -343,23 +344,26 @@ void parseConfigFile()
     bypass_mode = configRead.value("/setting/bypassMode","0").toInt();
     dump = configRead.value("/setting/ecDump","0").toInt();
 
-    //configRead.setValue("/setting/version", QString(ADT_AEC_VERSION));
-    configRead.setValue("/setting/version", QString("%1.%2.%3").arg(VER_MAJOR).arg(VER_MINOR).arg(VER_PATCH));
-    version = configRead.value("/setting/version","null").toString();
+    version = QString("%1.%2.%3").arg(VER_MAJOR).arg(VER_MINOR).arg(VER_PATCH);
+    configRead.setValue("/setting/version", version);
 
     if(configRead.value("/GPIO/gpio_enable").toString() == "YES") {
         g_AECState.gpio_enable = true;
         g_AECState.gpio_number = configRead.value("/GPIO/gpio_number").toInt();
-        g_AECState.is_enable = false;
+        //g_AECState.is_enable = false;
+        qDebug() << "gpio_enable = YES, gpio_number = " << g_AECState.gpio_number;
     }
     else {
         g_AECState.gpio_enable = false;
         g_AECState.gpio_number = -1;
-        g_AECState.is_enable = true;
+        //g_AECState.is_enable = true;
+        qDebug() << "gpio_enable = NO";
     }
 
     //qDebug()<<"src"<<src_type<<"dst"<<dst_type;
-    qDebug()<<"version"<<version<<"bypass"<<bypass_mode<<"dump"<<dump;
+    qDebug() << "version = " << version
+             << "\nbypass = " << bypass_mode
+             << "\ndump = " << dump ;
 
     g_AECState.is_ec_dump = dump;
     g_AECState.by_pass_mode = bypass_mode;
@@ -716,13 +720,15 @@ bool initALSACapture(char *captureDev)
 *
 * Description: This function is the entry of program.
 *
-* Arguments  : argc         count of parameters
+* Arguments  : outputOnly
 *
-*              argv         parameters
+*              captureDev
+*
+*              playbackDev
 *
 *
-* Returns    : == 0         Succeed.
-*              <  0         Failed.
+* Returns    : true          Succeed.
+*              false         Failed.
 *******************************************************************************
 */
 bool initAudio(bool outputOnly, char *captureDev, char *playbackDev)
@@ -1022,12 +1028,10 @@ void init()
 
     if(g_AECState.gpio_enable) {
         ret = gpioInit();
-        if (ret<0)
-        {
+        if (ret<0) {
             qDebug("GPIO initialization failed.!");
         }
     }
-
 
     if(!initAudio(0,capture_dev,play_back_dev))
     {
@@ -1044,13 +1048,6 @@ void init()
     system("amixer -q set 'PCM' 192 &");
     qDebug()<<"Audio 'PCM' set to 192.";
 
-    ret = pthread_create(&pThreadId, NULL,(void *) &frameProcess, NULL);
-    if(ret != 0)
-    {
-        qDebug("frameProcess thread create failed .Exit!  ");
-        return;
-    }
-
     if(g_AECState.gpio_enable) {
         ret = pthread_create(&bThreadId, NULL,(void *) &backGroundThread, NULL);
         if(ret != 0)
@@ -1058,8 +1055,20 @@ void init()
             qDebug("backGroundThread thread create failed .Exit!  ");
             return;
         }
+        else {
+            qDebug("backGroundThread created.");
+        }
     }
 
+    ret = pthread_create(&pThreadId, NULL,(void *) &frameProcess, NULL);
+    if(ret != 0)
+    {
+        qDebug("frameProcess thread create failed .Exit!  ");
+        return;
+    }
+    else {
+        qDebug("frameProcessThread created.");
+    }
 
     qDebug("adt_aec init OK.");
 }
@@ -1114,6 +1123,7 @@ void frameProcess(void *ptr )
     {
         //qDebug("frameProcess begin");
         while(g_AECState.is_enable)
+        //while(1)
         {
             readerror = snd_pcm_readi(g_AECState.audioInfo.pcm_handle_capture, stereo, size);
             if (readerror < 0)
@@ -1127,7 +1137,6 @@ void frameProcess(void *ptr )
             }
             else
             {
-
                 if(readerror != size)
                     qDebug("Short on samples captured: %d\n", readerror);
 
@@ -1229,10 +1238,11 @@ void frameProcess(void *ptr )
 #endif
                 }
             }
-        }
+        } // while(g_AECState.is_enable)
 
         usleep(2*1000);
-    }
+
+    } // while(1)
 
     //deinit audio
     qDebug("Shutting down Audio");
