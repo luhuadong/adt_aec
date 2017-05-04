@@ -43,17 +43,15 @@
  ***************************************************************************/
 
 //#define ADT_AEC_VERSION "0.0.11"
-
 #define VER_MAJOR 0
 #define VER_MINOR 0
-#define VER_PATCH 12
+#define VER_PATCH 13
 
 // Do not easily modify, Unless you really know what you're doing
-#define FRAME_SIZE 	160
-//#define FRAME_SIZE 	80
+//#define FRAME_SIZE 	160
+//#define MAX_FRAME_SIZE 640
+//#define SAMPLE_RATE	8000
 
-#define MAX_FRAME_SIZE 640
-#define SAMPLE_RATE	8000
 #define EC_DUMP 1
 #define PLAYBACK
 // modified by luhuadong at 20170323
@@ -92,15 +90,24 @@ typedef struct ADT_AECState {
     int  gpio_number;
 } ADT_AECState;
 
+typedef struct Audio_Parameter {
+    int frame_size;
+    int max_frame_size;
+    int sample_rate;
+    int buffer_size_ratio;
+} Audio_Parameter;
+
 struct pollfd fds[1];   // GPIO value file handlers
 static int gpio_fd ;    //,gpio_fd2
 static ADT_AECState g_AECState;
+static Audio_Parameter g_AudioPara;
 
 static int gpioInit(void);
 static void gpioHandle(void);
 
 static void init();
-static void parseConfigFile();
+static int  parseConfigFile(const QString &);
+static void initConfigFile(const QString &);
 static int  initAECEngine();
 static bool initAudio(bool outputOnly, char *captureDev, char *playbackDev);
 static bool initALSAPlayback(bool outputOnly, char *playbackDev);
@@ -156,6 +163,7 @@ void  customMessageHandler(QtMsgType type, const char *msg)
 
     QFile outFile(QCoreApplication::applicationDirPath() +"/adt_aec.log");
     outFile.open(QIODevice::WriteOnly | QIODevice::Append);
+    //outFile.open(QIODevice::WriteOnly);
     QTextStream ts(&outFile);
     ts << message << endl;
     outFile.flush();
@@ -318,6 +326,44 @@ static void gpioHandle(void)
 
 /*
 *******************************************************************************
+*                            initConfigFile
+*
+* Description: This function is the entry of program.
+*
+* Arguments  : argc         count of parameters
+*
+*              argv         parameters
+*
+*
+* Returns    : == 0         Succeed.
+*              <  0         Failed.
+*******************************************************************************
+*/
+static void initConfigFile(const QString &path)
+{
+    // Section [setting]
+
+    QSettings configWrite(path, QSettings::IniFormat);
+    configWrite.setValue("/setting/bypassMode", "0");
+    configWrite.setValue("/setting/ecDump", "1");
+    QString version = QString("%1.%2.%3").arg(VER_MAJOR).arg(VER_MINOR).arg(VER_PATCH);
+    configWrite.setValue("/setting/version", version);
+
+    // Section [GPIO]
+
+    configWrite.setValue("/GPIO/gpio_enable", "YES");
+    configWrite.setValue("/GPIO/gpio_number", "5");
+
+    // Section [parameter]
+
+    configWrite.setValue("/parameter/frame_size", "160");
+    configWrite.setValue("/parameter/max_frame_size", "640");
+    configWrite.setValue("/parameter/sample_rate", "8000");
+    configWrite.setValue("/parameter/buffer_size_ratio", "8");
+}
+
+/*
+*******************************************************************************
 *                            parseConfigFile
 *
 * Description: This function is the entry of program.
@@ -331,45 +377,57 @@ static void gpioHandle(void)
 *              <  0         Failed.
 *******************************************************************************
 */
-void parseConfigFile()
+int parseConfigFile(const QString &path)
 {
-    QString cfg_file = QString(QCoreApplication::applicationDirPath() +"/adt_aec.conf");
-    QString src_type,dst_type;
-    QString version;
-    int bypass_mode;
-    int dump;
+    QSettings configRead(path, QSettings::IniFormat);
 
-    QSettings configRead(cfg_file, QSettings::IniFormat);
-    src_type = configRead.value("/setting/srcType","alsa").toString();
-    dst_type = configRead.value("/setting/dstType","alsa").toString();
-    bypass_mode = configRead.value("/setting/bypassMode","0").toInt();
-    dump = configRead.value("/setting/ecDump","0").toInt();
+    // Section [setting]
 
-    version = QString("%1.%2.%3").arg(VER_MAJOR).arg(VER_MINOR).arg(VER_PATCH);
-    configRead.setValue("/setting/version", version);
+    QString src_type = configRead.value("/setting/srcType","alsa").toString();
+    QString dst_type = configRead.value("/setting/dstType","alsa").toString();
+    QString version = configRead.value("/setting/version", "0.0.1").toString();
+    g_AECState.by_pass_mode = configRead.value("/setting/bypassMode","0").toInt();
+    g_AECState.is_ec_dump = configRead.value("/setting/ecDump","1").toInt();
+
+    qDebug() << "############ Parse config file ############\n version = " << version
+             << "\n bypass = " << g_AECState.by_pass_mode << "\n ecDump = " << g_AECState.is_ec_dump
+             << "\n src_type = " << src_type << "\n dst_type = " << dst_type;
+
+    g_AECState.pcm_src  = PCMALSA;
+    g_AECState.pcm_dest = PCMALSA;
+
+    // Section [GPIO]
 
     if(configRead.value("/GPIO/gpio_enable").toString() == "YES") {
         g_AECState.gpio_enable = true;
         g_AECState.gpio_number = configRead.value("/GPIO/gpio_number").toInt();
         //g_AECState.is_enable = false;
-        qDebug() << "gpio_enable = YES, gpio_number = " << g_AECState.gpio_number;
+        qDebug() << "\n gpio_enable = YES, gpio_number = " << g_AECState.gpio_number;
     }
-    else {
+    else if(configRead.value("/GPIO/gpio_enable").toString() == "NO") {
         g_AECState.gpio_enable = false;
         g_AECState.gpio_number = -1;
         //g_AECState.is_enable = true;
-        qDebug() << "gpio_enable = NO";
+        qDebug() << "\n gpio_enable = NO";
+    }
+    else {
+        return -1;
     }
 
-    //qDebug()<<"src"<<src_type<<"dst"<<dst_type;
-    qDebug() << "version = " << version
-             << "\nbypass = " << bypass_mode
-             << "\ndump = " << dump ;
+    // Section [parameter]
 
-    g_AECState.is_ec_dump = dump;
-    g_AECState.by_pass_mode = bypass_mode;
-    g_AECState.pcm_src  = PCMALSA;
-    g_AECState.pcm_dest = PCMALSA;
+    g_AudioPara.frame_size = configRead.value("/parameter/frame_size", "160").toInt();
+    g_AudioPara.max_frame_size = configRead.value("/parameter/max_frame_size", "640").toInt();
+    g_AudioPara.sample_rate = configRead.value("/parameter/sample_rate", "8000").toInt();
+    g_AudioPara.buffer_size_ratio = configRead.value("/parameter/buffer_size_ratio", "8").toInt();
+
+    qDebug() << "\n FRAME_SIZE = " << g_AudioPara.frame_size
+             << "\n MAX_FRAME_SIZE = " << g_AudioPara.max_frame_size
+             << "\n SAMPLE_RATE = " << g_AudioPara.sample_rate
+             << "\n BUFFER_SIZE_RATIO = " << g_AudioPara.buffer_size_ratio
+             << "\n################################";
+
+    return 0;
 }
 
 /*
@@ -399,7 +457,7 @@ static int initAECEngine()
         // Base Parameters
         sizeof(IAECG4_Params),
         0,          //LockCallback_t
-        FRAME_SIZE, //FRAME_SIZE, Do not easily modify.
+        g_AudioPara.frame_size, //FRAME_SIZE, Do not easily modify.
         0,          // AntiHowlEnable
         8000,       //SAMPLING_RATE
         4000,       //SAMPLING_RATE/2
@@ -468,15 +526,15 @@ static int initAECEngine()
 *******************************************************************************
 *                              initALSAPlayback
 *
-* Description: This function is the entry of program.
+* Description: This function is the initialization of ALSA playback.
 *
-* Arguments  : argc         count of parameters
+* Arguments  : outputOnly         count of parameters
 *
-*              argv         parameters
+*              playbackDev         parameters
 *
 *
-* Returns    : == 0         Succeed.
-*              <  0         Failed.
+* Returns    : true          Succeed.
+*              false         Failed.
 *******************************************************************************
 */
 bool initALSAPlayback(bool outputOnly, char *playbackDev)
@@ -488,11 +546,11 @@ bool initALSAPlayback(bool outputOnly, char *playbackDev)
     pcm_name = strdup("plughw:0,0");
     //int rate = SAMPLE_RATE; /* Sample rate */
     int exact_rate;
-    int period_size=FRAME_SIZE;       /* Number of periods */
+    int period_size = g_AudioPara.frame_size;       /* Number of periods */
 
     // Do not easily modify, Unless you really know what you're doing
-    int buffer_size=period_size *2*2*2;
-    //int buffer_size=period_size * 2; // modified by luhuadong at 20170323
+    //int buffer_size = period_size *2*2*2;
+    int buffer_size = period_size * g_AudioPara.buffer_size_ratio; // modified by luhuadong at 20170323
 
     int error;
     int mode;
@@ -550,13 +608,14 @@ bool initALSAPlayback(bool outputOnly, char *playbackDev)
 
     /* Set sample rate. If the exact rate is not supported */
     /* by the hardware, use nearest possible rate.         */
-    exact_rate = SAMPLE_RATE;
+    exact_rate = g_AudioPara.sample_rate;
     if (snd_pcm_hw_params_set_rate_near(pcm_handle, hwparams, &exact_rate, 0) < 0) {
         qDebug("Error setting rate.\n");
         return(false);
     }
-    if (SAMPLE_RATE != exact_rate) {
-        qDebug("The rate %d Hz is not supported by your hardware.\n ==> Using %d Hz instead.\n", (int)SAMPLE_RATE, exact_rate);
+    if (exact_rate != g_AudioPara.sample_rate) {
+        qDebug("The rate %d Hz is not supported by your hardware.\n ==> Using %d Hz instead.\n",
+               g_AudioPara.sample_rate, exact_rate);
     }
 
     /* Set number of channels */
@@ -618,11 +677,11 @@ bool initALSACapture(char *captureDev)
 {
 
     int exact_rate;
-    int period_size= FRAME_SIZE;
+    int period_size= g_AudioPara.frame_size;
 
     // Do not easily modify, Unless you really know what you're doing
-    int buffer_size=period_size *2*2*2;
-    //int buffer_size=period_size * 2; // modified by luhuadong at 20170323
+    //int buffer_size=period_size *2*2*2;
+    int buffer_size = period_size * g_AudioPara.buffer_size_ratio; // modified by luhuadong at 20170323
 
     int error;
     char *pcm_name;
@@ -672,13 +731,14 @@ bool initALSACapture(char *captureDev)
 
     /* Set sample rate. If the exact rate is not supported */
     /* by the hardware, use nearest possible rate.         */
-    exact_rate = SAMPLE_RATE;
+    exact_rate = g_AudioPara.sample_rate;
     if (snd_pcm_hw_params_set_rate_near(pcm_handle, hwparams, &exact_rate, 0) < 0) {
         qDebug("Error setting rate.\n");
         return(false);
     }
-    if (SAMPLE_RATE != exact_rate) {
-        qDebug("The rate %d Hz is not supported by your hardware.\n ==> Using %d Hz instead.\n", (int)SAMPLE_RATE, exact_rate);
+    if (exact_rate != g_AudioPara.sample_rate) {
+        qDebug("The rate %d Hz is not supported by your hardware.\n ==> Using %d Hz instead.\n",
+               g_AudioPara.sample_rate, exact_rate);
     }
 
     /* Set number of channels */
@@ -745,23 +805,19 @@ bool initAudio(bool outputOnly, char *captureDev, char *playbackDev)
 
 #ifdef PLAYBACK
     //init playback
-    if(!initALSAPlayback(outputOnly, playbackDev))
-    {
+    if(!initALSAPlayback(outputOnly, playbackDev)) {
         qDebug()<<"Audio playback init failed";
         return false;
     }
 #endif
 
-    if(!outputOnly)
-    {
+    if(!outputOnly) {
         //init capture
-        if(!initALSACapture(captureDev))
-        {
+        if(!initALSACapture(captureDev)) {
             qDebug()<< "Audio capture init failed";
             return false;
         }
     }
-
     return true;
 }
 
@@ -1031,7 +1087,17 @@ void init()
 
     qDebug()<<"/*******************************************/";
 
-    parseConfigFile();
+    // parse configure file to load some parameters
+    QString cfgFileName = QString(QCoreApplication::applicationDirPath() +"/adt_aec.conf");
+    QFile cfg_file(cfgFileName);
+
+    if(!cfg_file.exists()) {
+        qDebug() << cfgFileName << " is not existed, create it now.";
+        initConfigFile(cfgFileName);
+    }
+    if(0 != parseConfigFile(cfgFileName)) {
+        qDebug() << "Warning: Make mistakes when parsing configure file.";
+    }
 
     if(g_AECState.gpio_enable) {
         ret = gpioInit();
@@ -1104,18 +1170,18 @@ void init()
 void frameProcess(void *ptr )
 {
     bool restartOutput=false;
-    short int RxOut[FRAME_SIZE];  //not use it indeed
+    short int RxOut[g_AudioPara.frame_size];  //not use it indeed
     int readerror, writeerror;
     int i,retVal;
     int j = 0;
 
-    ADT_Int16 echo[MAX_FRAME_SIZE];
-    ADT_Int16 ref[MAX_FRAME_SIZE];
-    ADT_Int16 clean[MAX_FRAME_SIZE];
+    ADT_Int16 echo[g_AudioPara.max_frame_size];
+    ADT_Int16 ref[g_AudioPara.max_frame_size];
+    ADT_Int16 clean[g_AudioPara.max_frame_size];
 
-    ADT_Int16 stereo[MAX_FRAME_SIZE*2];
-    ADT_Int16 out_stereo[MAX_FRAME_SIZE*2];
-    snd_pcm_uframes_t size = FRAME_SIZE;
+    ADT_Int16 stereo[g_AudioPara.max_frame_size * 2];
+    ADT_Int16 out_stereo[g_AudioPara.max_frame_size * 2];
+    snd_pcm_uframes_t size = g_AudioPara.frame_size;
 
     qDebug("frameProcess begin");
 
