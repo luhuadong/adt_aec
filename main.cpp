@@ -407,7 +407,7 @@ int parseConfigFile(const QString &path)
     else if(configRead.value("/GPIO/gpio_enable").toString() == "NO") {
         g_AECState.gpio_enable = false;
         g_AECState.gpio_number = -1;
-        //g_AECState.is_enable = true;
+        g_AECState.is_enable = true;
         qDebug() << "\n gpio_enable = NO";
     }
     else {
