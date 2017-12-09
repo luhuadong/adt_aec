@@ -45,7 +45,7 @@
 //#define ADT_AEC_VERSION "0.0.11"
 #define VER_MAJOR 0
 #define VER_MINOR 0
-#define VER_PATCH 13
+#define VER_PATCH 14
 
 // Do not easily modify, Unless you really know what you're doing
 //#define FRAME_SIZE 	160
@@ -56,6 +56,8 @@
 #define PLAYBACK
 // modified by luhuadong at 20170323
 //#define PRINT_ERL
+
+#define FIFO_NAME "/tmp/aec_ctrl_fifo"
 
 // Definition of application's audio I/O information.
 typedef struct
@@ -1082,8 +1084,13 @@ void init()
     int ret;
     pthread_t pThreadId;
     pthread_t bThreadId;
+#if 0
     char *play_back_dev = strdup("plughw:0,0");
     char *capture_dev   = strdup("plughw:0,0");
+#else
+    char *play_back_dev = strdup("default");
+    char *capture_dev   = strdup("default");
+#endif
 
     qDebug()<<"/*******************************************/";
 
