@@ -11,7 +11,7 @@
 * File      : MAIN.CPP
 * Created   : Zheng Yu
 * Modified  : Lu Huadong
-* Version   : V0.0.12
+* Version   : V0.0.14
 *
 * DESCRIPTION:
 * ---------------
@@ -31,6 +31,10 @@
 #include <sys/time.h>
 #include <fcntl.h>   /* added for GPIO */
 #include <stdio.h>
+#include <sys/prctl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <alsa/asoundlib.h>
 #include "adt_typedef_user.h"
@@ -57,7 +61,10 @@
 // modified by luhuadong at 20170323
 //#define PRINT_ERL
 
+#define USE_FIFO_IPC 1
+#if USE_FIFO_IPC
 #define FIFO_NAME "/tmp/aec_ctrl_fifo"
+#endif
 
 // Definition of application's audio I/O information.
 typedef struct
@@ -189,6 +196,24 @@ void  customMessageHandler(QtMsgType type, const char *msg)
 */
 static int gpioInit(void)
 {
+#if USE_FIFO_IPC
+    int ret;
+    if(access(FIFO_NAME, F_OK) == -1) {
+        ret = mkfifo(FIFO_NAME, 0666);
+        if(ret != 0) {
+            qDebug("Mkfifo hands free fifo (IPC) failed!\n");
+            return -1;
+        }
+    }
+
+    gpio_fd = open(FIFO_NAME, O_RDONLY);
+    if(gpio_fd < 0) {
+        qDebug("Open file hands free fifo (IPC) failed!\n");
+        return -1;
+    }
+    qDebug("Open file hands free fifo (IPC) successlly!\n");
+#else
+
     int ret;
     char ch;
     int fd;
@@ -260,6 +285,7 @@ static int gpioInit(void)
         //        }
         qDebug("First value of CTRL pin is: %c. \n", ch);
     }
+#endif
 
     g_AECState.is_enable = false;
     return 0;
@@ -282,6 +308,35 @@ static int gpioInit(void)
 */
 static void gpioHandle(void)
 {
+    int ret;
+    char buffer[1];
+
+#if USE_FIFO_IPC
+    ret = read(gpio_fd, buffer, 1);
+    if(-1 == ret) {
+        //qDebug() << "gpioHandle : Read fifo failed!";
+        return ;
+    }
+    else {
+        qDebug() << "gpioHandle : Read fifo come on!" << QString::number((int)buffer[0]);
+
+        /*
+         * 0 : Handfree button was normal.
+         * 1 : Handfree button was pressed.
+         *
+         */
+
+        if(1 == (int)buffer[0]) {
+            g_AECState.is_enable = true;
+            qDebug("Hands free button was pressed. AEC is enable.");
+        }
+        else if (0 == (int)buffer[0]) {
+            g_AECState.is_enable = false;
+            qDebug("Hands free button was normal. AEC is disable.");
+        }
+    }
+#else
+
     int ret;
     char ch;
 
@@ -322,6 +377,7 @@ static void gpioHandle(void)
             }
         } // End if(fds[0].revents & POLLPRI)
     }
+#endif
 
     return;
 }
@@ -347,7 +403,7 @@ static void initConfigFile(const QString &path)
 
     QSettings configWrite(path, QSettings::IniFormat);
     configWrite.setValue("/setting/bypassMode", "0");
-    configWrite.setValue("/setting/ecDump", "1");
+    configWrite.setValue("/setting/ecDump", "0");
     QString version = QString("%1.%2.%3").arg(VER_MAJOR).arg(VER_MINOR).arg(VER_PATCH);
     configWrite.setValue("/setting/version", version);
 
@@ -377,6 +433,27 @@ static void initConfigFile(const QString &path)
 *
 * Returns    : == 0         Succeed.
 *              <  0         Failed.
+*
+*
+* adt_aec.conf
+*
+* [setting]
+* bypassMode=0         ; bypass or not (0: No, 1: Yes)
+* ecDump=0             ; record or not (0: No, 1: Yes)
+* version=0.0.13       ; version number
+*
+* [GPIO]
+* gpio_enable=YES      ; detect handfree signal by gpio (YES or NO)
+* gpio_number=5        ; if gpio_enable=YES, you should set a number for gpio which you want to use.
+*                      ; while define Macro USE_FIFO_IPC=1, this parameter will be ignore, that mean
+*                      ; it will use fifo(IPC) instead of detecting gpio.
+*
+* [parameter]          ; if you are not sure what that means, please do not change these.
+* frame_size=160       ; frame size
+* max_frame_size=640   ; max frame size
+* sample_rate=8000     ; sample rate
+* buffer_size_ratio=8  ; receive and send buffer size ratio (must be a power of 2)
+*
 *******************************************************************************
 */
 int parseConfigFile(const QString &path)
@@ -389,7 +466,7 @@ int parseConfigFile(const QString &path)
     QString dst_type = configRead.value("/setting/dstType","alsa").toString();
     QString version = configRead.value("/setting/version", "0.0.1").toString();
     g_AECState.by_pass_mode = configRead.value("/setting/bypassMode","0").toInt();
-    g_AECState.is_ec_dump = configRead.value("/setting/ecDump","1").toInt();
+    g_AECState.is_ec_dump = configRead.value("/setting/ecDump","0").toInt();
 
     qDebug() << "############ Parse config file ############\n version = " << version
              << "\n bypass = " << g_AECState.by_pass_mode << "\n ecDump = " << g_AECState.is_ec_dump
@@ -409,7 +486,7 @@ int parseConfigFile(const QString &path)
     else if(configRead.value("/GPIO/gpio_enable").toString() == "NO") {
         g_AECState.gpio_enable = false;
         g_AECState.gpio_number = -1;
-        g_AECState.is_enable = true;
+        //g_AECState.is_enable = true;
         qDebug() << "\n gpio_enable = NO";
     }
     else {
@@ -1002,6 +1079,7 @@ void backGroundThread(void *ptr)
     int countDown = 50;
 
     pthread_setschedparam(pthread_self(),SCHED_OTHER, NULL);
+    prctl(PR_SET_NAME, "backGroundThread");
 
     while(1)
     {
@@ -1108,8 +1186,9 @@ void init()
 
     if(g_AECState.gpio_enable) {
         ret = gpioInit();
-        if (ret<0) {
+        if (ret < 0) {
             qDebug("GPIO initialization failed.!");
+            exit(EXIT_FAILURE);
         }
     }
 
@@ -1191,6 +1270,7 @@ void frameProcess(void *ptr )
     snd_pcm_uframes_t size = g_AudioPara.frame_size;
 
     qDebug("frameProcess begin");
+    prctl(PR_SET_NAME, "frameProcess");
 
 #ifdef PLAYBACK
     retVal = snd_pcm_link(g_AECState.audioInfo.pcm_handle_capture, g_AECState.audioInfo.pcm_handle_playback);
