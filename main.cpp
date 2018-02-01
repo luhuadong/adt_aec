@@ -61,6 +61,10 @@
 // modified by luhuadong at 20170323
 //#define PRINT_ERL
 
+/*
+ * if USE_FIFO_IPC == 1, detect hand-free signal by IPC(fifo)
+ * if not, detect hand-free signal by GPIO
+ */
 #define USE_FIFO_IPC 1
 #if USE_FIFO_IPC
 #define FIFO_NAME "/tmp/aec_ctrl_fifo"
@@ -440,7 +444,7 @@ static void initConfigFile(const QString &path)
 * [setting]
 * bypassMode=0         ; bypass or not (0: No, 1: Yes)
 * ecDump=0             ; record or not (0: No, 1: Yes)
-* version=0.0.13       ; version number
+* version=0.0.14       ; version number
 *
 * [GPIO]
 * gpio_enable=YES      ; detect handfree signal by gpio (YES or NO)
