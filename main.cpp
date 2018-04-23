@@ -1286,6 +1286,11 @@ void frameProcess(void *ptr )
     while(1)
     {
         //qDebug("frameProcess begin");
+
+        /* In order to support the function that use bypass mode during test for Yinliuyi
+         * So
+         */
+        //while(g_AECState.is_enable || g_AECState.by_pass_mode)
         while(g_AECState.is_enable)
         //while(1)
         {
