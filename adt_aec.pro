@@ -30,4 +30,9 @@ INCLUDEPATH +=/opt/poky/1.5.3/sysroots/cortexa9hf-vfp-neon-poky-linux-gnueabi/us
 
 SOURCES += main.cpp
 
-HEADERS +=
+HEADERS += \
+    include/aecg4.h \
+    include/iaecg4.h
+
+DISTFILES += \
+    adt_aec.conf

@@ -11,7 +11,7 @@
 * File      : MAIN.CPP
 * Created   : Zheng Yu
 * Modified  : Lu Huadong
-* Version   : V0.0.14
+* Version   : V1.0.1
 *
 * DESCRIPTION:
 * ---------------
@@ -114,6 +114,55 @@ struct pollfd fds[1];   // GPIO value file handlers
 static int gpio_fd ;    //,gpio_fd2
 static ADT_AECState g_AECState;
 static Audio_Parameter g_AudioPara;
+
+static IAECG4_Params MyParams = {
+    // Base Parameters
+    sizeof(IAECG4_Params),
+    0,          //LockCallback_t
+    g_AudioPara.frame_size, //FRAME_SIZE, Do not easily modify.
+    0,          // AntiHowlEnable
+    8000,       //SAMPLING_RATE
+    4000,       //SAMPLING_RATE/2
+    0,          //FixedBulkDelayMSec // modified by luhuadong at 20170323
+    0,          //TailSearchSamples
+    0,          //InitialBulkDelay
+    128,        // ADT_Int16 ActiveTailLengthMSec
+    128,        //32,       //ADT_Int16 TotalTailLengthMSec
+    1,          //0,//10,   //ADT_Int16 txNLPAggressiveness
+    20,         //0,//33,   //ADT_Int16 MaxTxLossSTdB;
+    15,         //0, //12, //12, //ADT_Int16 MaxTxLossDTdB;
+    4,          // 12, //ADT_Int16 MaxRxLossdB;
+    0,          //InitialRxOutAttendB
+    -85,        // ADT_Int16 TargetResidualLeveldBm;
+    -90,        //-60,    // ADT_Int16 MaxRxNoiseLeveldBm;
+    -25,        // ADT_Int16 worstExpectedERLdB
+    -3,         //-3, //6, //      //RxSaturateLeveldBm
+    1,          // ADT_Int16 NoiseReduction1Setting
+    0,          // ADT_Int16 NoiseReduction2Setting
+    1,          //CNGEnable
+    0,          //0,      //fixedGaindB10
+
+    // TxAGC Parameters
+    0,          // ADT_Int8 AGCEnable;
+    10,         // ADT_Int8 AGCMaxGaindB;
+    10,         //ADT_Int8 AGCMaxLossdB;
+    -15,        // ADT_Int8 AGCTargetLeveldBm;
+    -40,        //ADT_Int8 AGCLowSigThreshdBm;
+
+    // RxAGC Parameters
+    0,          // ADT_Int8 AGCEnable;
+    10,         // ADT_Int8 AGCMaxGaindB;
+    15,         //ADT_Int8 AGCMaxLossdB;
+    -10,        // ADT_Int8 AGCTargetLeveldBm;
+    -40,        //ADT_Int8 AGCLowSigThreshdBm;
+    0,          //RxBypass
+    0,          //ADT_Int16 maxTrainingTimeMSec,
+    -40,        //trainingRxNoiseLeveldBm
+    0,          //ADT_Int16 pTxEqualizer
+    0,          //mipsMemReductionSetting
+    0,          //mipsReductionSetting2
+    0           //reserved
+};
 
 static int gpioInit(void);
 static void gpioHandle(void);
@@ -331,6 +380,7 @@ static void gpioHandle(void)
          */
 
         if(1 == (int)buffer[0]) {
+            //AECG4_ADT_reset(g_AECState.hAEC, &MyParams);
             g_AECState.is_enable = true;
             qDebug("Hands free button was pressed. AEC is enable.");
         }
@@ -535,55 +585,6 @@ static int initAECEngine()
     g_AECState.echofile = NULL;
     g_AECState.reffile = NULL;
     g_AECState.stereofile = NULL;
-
-    IAECG4_Params MyParams = {
-        // Base Parameters
-        sizeof(IAECG4_Params),
-        0,          //LockCallback_t
-        g_AudioPara.frame_size, //FRAME_SIZE, Do not easily modify.
-        0,          // AntiHowlEnable
-        8000,       //SAMPLING_RATE
-        4000,       //SAMPLING_RATE/2
-        0,          //FixedBulkDelayMSec // modified by luhuadong at 20170323
-        0,          //TailSearchSamples
-        0,          //InitialBulkDelay
-        128,        // ADT_Int16 ActiveTailLengthMSec
-        128,        //32,       //ADT_Int16 TotalTailLengthMSec
-        1,          //0,//10,   //ADT_Int16 txNLPAggressiveness
-        20,         //0,//33,   //ADT_Int16 MaxTxLossSTdB;
-        15,         //0, //12, //12, //ADT_Int16 MaxTxLossDTdB;
-        4,          // 12, //ADT_Int16 MaxRxLossdB;
-        0,          //InitialRxOutAttendB
-        -85,        // ADT_Int16 TargetResidualLeveldBm;
-        -90,        //-60,    // ADT_Int16 MaxRxNoiseLeveldBm;
-        -25,        // ADT_Int16 worstExpectedERLdB
-        -3,         //-3, //6, //      //RxSaturateLeveldBm
-        1,          // ADT_Int16 NoiseReduction1Setting
-        0,          // ADT_Int16 NoiseReduction2Setting
-        1,          //CNGEnable
-        0,          //0,      //fixedGaindB10
-
-        // TxAGC Parameters
-        0,          // ADT_Int8 AGCEnable;
-        10,         // ADT_Int8 AGCMaxGaindB;
-        10,         //ADT_Int8 AGCMaxLossdB;
-        -15,        // ADT_Int8 AGCTargetLeveldBm;
-        -40,        //ADT_Int8 AGCLowSigThreshdBm;
-
-        // RxAGC Parameters
-        0,          // ADT_Int8 AGCEnable;
-        10,         // ADT_Int8 AGCMaxGaindB;
-        15,         //ADT_Int8 AGCMaxLossdB;
-        -10,        // ADT_Int8 AGCTargetLeveldBm;
-        -40,        //ADT_Int8 AGCLowSigThreshdBm;
-        0,          //RxBypass
-        0,          //ADT_Int16 maxTrainingTimeMSec,
-        -40,        //trainingRxNoiseLeveldBm
-        0,          //ADT_Int16 pTxEqualizer
-        0,          //mipsMemReductionSetting
-        0,          //mipsReductionSetting2
-        0           //reserved
-    };
 
     if ((g_AECState.hAEC = AECG4_ADT_create(0, &MyParams)) == 0) {
         g_AECState.by_pass_mode = 1;
